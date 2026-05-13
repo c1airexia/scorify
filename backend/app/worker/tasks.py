@@ -32,11 +32,15 @@ def transcribe_task(self, job_id: str):
 
     piano_path = separate_piano(input_path, job_dir)
 
-    # --- Step 2: Basic Pitch (Stage 4 placeholder) ---
+    # --- Step 2: Basic Pitch note detection ---
     self.update_state(
         state="PROGRESS",
         meta={"step": "transcribing", "detail": "Detecting notes...", "progress": 0.5},
     )
+
+    from app.pipeline.transcribe import audio_to_midi
+
+    midi_path = audio_to_midi(piano_path, job_dir)
 
     # --- Step 3: music21 processing (Stage 5 placeholder) ---
     self.update_state(
@@ -46,9 +50,10 @@ def transcribe_task(self, job_id: str):
 
     result = {
         "step": "done",
-        "detail": "Piano stem separated successfully",
+        "detail": "Transcription complete",
         "progress": 1.0,
         "piano_stem": str(piano_path),
+        "midi_file": str(midi_path),
     }
     log.info("Job %s completed: %s", job_id, result)
     return result

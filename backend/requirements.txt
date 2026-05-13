@@ -6,3 +6,7 @@ pydantic-settings
 python-multipart
 yt-dlp
 demucs
+basic-pitch
+onnxruntime
+numba==0.60.0
+llvmlite==0.43.0
