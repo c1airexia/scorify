@@ -20,11 +20,7 @@ async def create_job(
     file: Optional[UploadFile] = File(None),
     url: Optional[str] = Form(None),
 ):
-    """Accept an audio file upload or a YouTube URL.
-
-    Creates a job directory, stores the audio, and returns a job_id.
-    Processing is wired up in Stage 3.
-    """
+    """Accept an audio file upload or a YouTube URL, then start processing."""
     if not file and not url:
         raise HTTPException(status_code=400, detail="Provide either a file or a YouTube URL")
 
@@ -44,8 +40,16 @@ async def create_job(
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(e))
 
+    from app.worker.tasks import transcribe_task
+
+    task = transcribe_task.delay(job_id)
+
+    task_id_file = job_dir / ".task_id"
+    task_id_file.write_text(task.id)
+
     return {
         "job_id": job_id,
+        "task_id": task.id,
         "filename": audio_path.name,
         "size_mb": round(audio_path.stat().st_size / 1e6, 2),
     }
@@ -81,14 +85,49 @@ def _download_url(url: str, job_dir: Path) -> Path:
 
 @router.get("/{job_id}")
 async def get_job_status(job_id: str):
-    """Check the status of a transcription job. (Wired up in Stage 3.)"""
+    """Check the status of a transcription job by reading Celery task state."""
     job_dir = settings.upload_dir / job_id
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Job not found")
 
-    has_input = any(job_dir.glob("input.*"))
-    return {
-        "job_id": job_id,
-        "status": "uploaded" if has_input else "unknown",
-        "message": "Processing not yet implemented (Stage 3)",
-    }
+    task_id_file = job_dir / ".task_id"
+    if not task_id_file.exists():
+        return {"job_id": job_id, "status": "uploaded", "progress": 0, "step": "queued"}
+
+    from app.worker.celery_app import celery
+
+    task_id = task_id_file.read_text().strip()
+    result = celery.AsyncResult(task_id)
+
+    if result.state == "PENDING":
+        return {"job_id": job_id, "status": "pending", "progress": 0, "step": "queued", "detail": "Waiting for worker..."}
+    elif result.state == "STARTED":
+        return {"job_id": job_id, "status": "started", "progress": 0.05, "step": "starting", "detail": "Worker picked up job..."}
+    elif result.state == "PROGRESS":
+        info = result.info or {}
+        return {
+            "job_id": job_id,
+            "status": "processing",
+            "progress": info.get("progress", 0),
+            "step": info.get("step", "unknown"),
+            "detail": info.get("detail", ""),
+        }
+    elif result.state == "SUCCESS":
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "progress": 1.0,
+            "step": "done",
+            "detail": "Processing complete",
+            "result": result.result,
+        }
+    elif result.state == "FAILURE":
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "progress": 0,
+            "step": "error",
+            "detail": str(result.result),
+        }
+    else:
+        return {"job_id": job_id, "status": result.state.lower(), "progress": 0, "step": "unknown"}

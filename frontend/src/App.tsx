@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import UploadForm from "./components/UploadForm";
+import JobProgress from "./components/JobProgress";
 import "./App.css";
 
 const API_URL = "http://localhost:8000";
@@ -7,11 +8,9 @@ const API_URL = "http://localhost:8000";
 function App() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [jobResult, setJobResult] = useState<{
-    job_id: string;
-    filename: string;
-    size_mb: number;
-  } | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const completedRef = useRef(false);
 
   useEffect(() => {
     fetch(`${API_URL}/health`)
@@ -19,6 +18,25 @@ function App() {
       .then(() => setConnected(true))
       .catch(() => setError("Cannot connect to backend. Is the server running?"));
   }, []);
+
+  const handleJobCreated = (result: { job_id: string }) => {
+    completedRef.current = false;
+    setDone(false);
+    setJobId(result.job_id);
+  };
+
+  const handleComplete = (_result: Record<string, unknown>) => {
+    if (!completedRef.current) {
+      completedRef.current = true;
+      setDone(true);
+    }
+  };
+
+  const reset = () => {
+    setJobId(null);
+    setDone(false);
+    completedRef.current = false;
+  };
 
   return (
     <div className="app">
@@ -30,33 +48,20 @@ function App() {
       <main>
         {error && <p className="error">{error}</p>}
 
-        {connected && !jobResult && (
-          <UploadForm onJobCreated={setJobResult} />
+        {connected && !jobId && <UploadForm onJobCreated={handleJobCreated} />}
+
+        {jobId && !done && (
+          <JobProgress jobId={jobId} onComplete={handleComplete} />
         )}
 
-        {jobResult && (
+        {done && (
           <div className="status-card success">
-            <p>Audio received!</p>
-            <table>
-              <tbody>
-                <tr>
-                  <td>Job ID</td>
-                  <td><code>{jobResult.job_id}</code></td>
-                </tr>
-                <tr>
-                  <td>File</td>
-                  <td>{jobResult.filename}</td>
-                </tr>
-                <tr>
-                  <td>Size</td>
-                  <td>{jobResult.size_mb} MB</td>
-                </tr>
-              </tbody>
-            </table>
-            <button
-              className="new-job-btn"
-              onClick={() => setJobResult(null)}
-            >
+            <p>Piano stem separated!</p>
+            <p className="detail">
+              The piano track has been isolated from the audio.
+              Next stages will detect notes and render sheet music.
+            </p>
+            <button className="new-job-btn" onClick={reset}>
               Upload another
             </button>
           </div>
